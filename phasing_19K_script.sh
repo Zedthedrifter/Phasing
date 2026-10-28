@@ -77,7 +77,7 @@ for chr in {1..12}; do
     start=$(cut -f 3 -d ' ' $INDIR/${PREFIX}_Chr${chr}.gen | head -1)
     end=$(cut -f 3 -d ' ' $INDIR/${PREFIX}_Chr${chr}.gen| tail -1)
     
-    # Add a small buffer (optional, e.g., 100kb) to ensure full coverage
+    # a small buffer for the global start/end
     echo $start $end
     start_buf=$((start - 100))
     end_buf=$((end + 100))
@@ -101,6 +101,7 @@ for chr in {1..12}; do
         if [ $chunk_end -gt $end ]; then
             chunk_end=$end
         fi
+        # IMPUTE2 adds 250 kb buffer by defaul: https://mathgen.stats.ox.ac.uk/impute/impute_v2.html#options
         
         echo "  Chunk $chunk_count: $chunk_start - $chunk_end (int: $int_start - $int_end)"
         impute2 -m $REFDIR/ReferencePanel_4.8M_SNP_chr${chr}updated.map \
@@ -140,7 +141,7 @@ mkdir -p $RESULT2
 setup_dir
 
 #STEP 1: CONVERT PLINK FORMAT
-#convert_plink $DATA $genome1.biallelic.base.genomewide.SNPs.withID.PlinkFormat $GENOME
+#convert_plink $DATA $RESULT1 genome1.biallelic.base.genomewide.SNPs.withID.PlinkFormat $GENOME
 #STEP 2: RUN IMPUTE2
 run_impute2 $RESULT1 $RESULT2 $GENOME $IMPUTE2_REF
 }

@@ -2,16 +2,18 @@
 
 function set_up_intel_env {
 
-CONDA_SUBDIR=osx-64 conda create -y -n eagle_intel python=3.9
+ENV=eagle_intel
+
+CONDA_SUBDIR=osx-64 conda create -y -n $ENV python=3.9
 #use specific env
-source $HOME/miniforge3/bin/activate eagle_intel
+source $HOME/miniforge3/bin/activate $ENV
 echo $CONDA_DEFAULT_ENV #double check the env is correct
 #install
 conda config --env --set subdir osx-64
 #conda install -c bioconda eagle2 -y #for human, not a good option, uninstalled
-conda install -c bioconda plink -y
-conda install -c bioconda plink2 -y
-conda install -c bioconda impute2 -y
+conda install -c bioconda plink -y -n $ENV
+conda install -c bioconda plink2 -y -n $ENV
+conda install -c bioconda impute2 -y -n $ENV
 
 #MANUAL
 }
@@ -54,6 +56,7 @@ OUTDIR=$2
 PREFIX=$3
 REFDIR=$4
 CHUNK_SIZE=1000000  # 1 Mb chunks + 250 kb buffer (default from IMPUTE2 manual)
+BUFFER=250000 #optional, e.g., 100kb
 
 source $HOME/miniforge3/bin/activate eagle_intel
 echo "USING ENV" $CONDA_DEFAULT_ENV
@@ -64,8 +67,8 @@ for chr in {1..2}; do
     
     # Add a small buffer (optional, e.g., 100kb) to ensure full coverage
     echo $start $end
-    start_buf=$((start - 100))
-    end_buf=$((end + 100))
+    start_buf=$((start - $BUFFER))
+    end_buf=$((end + $BUFFER))
     #
     echo "Chromosome $chr range: $start to $end"
     
@@ -95,7 +98,7 @@ for chr in {1..2}; do
                 -int $chunk_start $chunk_end \
                 -Ne 10000 \
                 -k_hap 100 \
-                --threads 4--threads 4 \
+                --threads 4 \
                 -o $OUTDIR/${PREFIX}_Chr${chr}_chunk${chunk_count}    
     done
 done
@@ -118,9 +121,7 @@ function setup_dir {
 mkdir -p $WORKDIR
 mkdir -p $RESULT1
 mkdir -p $RESULT2
-mkdir -p $RESULT3
-mkdir -p $RESULT5
-mkdir -p $RESULT5
+
 
 }
 setup_dir

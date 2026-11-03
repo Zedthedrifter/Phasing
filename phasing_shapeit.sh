@@ -131,6 +131,58 @@ SHAPEIT5_ligate \
 #rm -f $OUTDIR/${CHR}_bcf_file_list.txt.tmp
 }
 
+function phase_rare {
+
+    VCF=$1
+    CHR=$2
+    START=$3
+    END=$4
+    STEP=$5
+    OVERLAP=$6
+    SCAFFOLD=$7
+    OUTDIR=$8
+
+    source $HOME/miniforge3/bin/activate shapeit5-env
+    echo "USING ENV: $CONDA_DEFAULT_ENV"
+    mkdir -p "$OUTDIR"
+
+    # Verify the scaffold file is indexed
+    if [ ! -f "${SCAFFOLD}.csi" ]; then
+        echo "Indexing scaffold file..."
+        bcftools index -f "$SCAFFOLD"
+    fi
+
+    core_start=$START
+    core_end=$((core_start + STEP - 1))
+        if ((core_end > END)); then core_end=$END; fi
+
+        chunk_end=$((core_end + OVERLAP))
+        chunk_start=$((core_start - OVERLAP))
+        if ((chunk_end > END)); then
+            chunk_end=$END
+        fi
+        if ((chunk_start < START)); then
+            chunk_start=$START
+        fi
+
+        # Define ranges and output name using the core (non-overlapping) coordinates
+        SCAFFOLD_RANGE="${CHR}:${chunk_start}-${chunk_end}"
+        CORE_RANGE="${CHR}:${core_start}-${core_end}"
+        OUT_NAME="${OUTDIR}/${CHR}_${core_start}-${core_end}.rare.bcf"
+
+        echo "Phasing rare variants for ${CORE_RANGE} with scaffold range : ${SCAFFOLD_RANGE}"
+        SHAPEIT5_phase_rare \
+            --input "$VCF" \
+            --input-region "$CORE_RANGE" \
+            --scaffold "$SCAFFOLD" \
+            --scaffold-region "$SCAFFOLD_RANGE" \
+            --map "${RIS_reference_panel}/ReferencePanel_4.8M_SNP_chr${CHR}updated.map" \
+            --output "$OUT_NAME" \
+            --thread 8
+ 
+
+}
+
 function phase_rare_chunks {
     VCF=$1
     CHR=$2
@@ -196,7 +248,7 @@ echo "CONCATENATE ALL chunks of chr $CHR"
 ls -1vd ${INDIR}/${CHR}_*-*.bcf | awk -F'/' '{      
     n = split($NF, a, "_");
     print a[2] "\t" $0
-}' | sort -k1,1n | cut -f2- |head -n 4 > $OUTDIR/${CHR}_bcf_file_list.txt.tmp
+}' | sort -k1,1n | cut -f2- > $OUTDIR/${CHR}_bcf_file_list.txt.tmp
 
 cat $OUTDIR/${CHR}_bcf_file_list.txt.tmp
 
@@ -209,6 +261,77 @@ bcftools concat \
 bcftools index \
     -f ${OUTDIR}/chr_${CHR}_scaffold.bcf
 }
+
+#CLEAN ANCESTRAL ALLELE INFO
+
+function clean_AA {
+
+source $HOME/miniforge3/bin/activate est-sfs
+echo "USING ENV" $CONDA_DEFAULT_ENV
+
+AA=$1
+NAME=$2
+OUTDIR=$3
+
+echo "Preparing AA TSV (converting NA to .)..."
+    
+    # 1. Convert 'NA' to '.' using awk
+    # Assuming your TSV has no header and NA is in the 3rd column
+    head $AA
+    awk -F'\t' 'BEGIN{OFS="\t"} {if ($3 == "NA" || $3 == "") $3="."; print}' \
+        "$AA" > "$OUTDIR/${NAME}_cleaned.tsv"
+    
+    echo "Sorting and compressing cleaned TSV..."
+    
+    # 2. Sort, bgzip, and index the TSV for bcftools
+    # Note: bcftools requires the annotation file to be sorted
+    sort -k1,1 -k2,2n "$OUTDIR/${NAME}_cleaned.tsv" | bgzip > "$OUTDIR/${NAME}_cleaned.tsv.gz"
+    tabix -s1 -b2 -e2 "$OUTDIR/${NAME}_cleaned.tsv.gz"
+}
+#ADD ANCESTRAL ALLELE INFO
+function add_AA {
+
+source $HOME/miniforge3/bin/activate est-sfs
+echo "USING ENV" $CONDA_DEFAULT_ENV
+
+AA=$1
+VCF=$2
+NAME=$3
+OUTDIR=$4
+    
+    echo "Annotating VCF..."
+    echo '##INFO=<ID=AA,Number=1,Type=String,Description="Ancestral Allele">' > $OUTDIR/aa_header.txt
+    # 3. Annotate the VCF
+    # -c CHROM,POS,AA: matches on the first two columns, adds the AA tag
+    bcftools annotate \
+        -a "$AA" \
+        -h "$OUTDIR/aa_header.txt" \
+        -c CHROM,POS,AA \
+        -Oz -o "$OUTDIR/${NAME}_wAA.vcf.gz" \
+        "$VCF"
+    
+    echo "Indexing final VCF..."
+    bcftools index -f "$OUTDIR/${NAME}_wAA.vcf.gz"
+    
+    echo "Output: $OUTDIR/${NAME}_wAA.vcf.gz"
+}
+
+#CONVERT TO VCZ
+function convert_vcz {
+
+INFILE=$1
+OUTDIR=$2
+NAME=$3
+
+source $HOME/miniforge3/bin/activate ts
+echo "USING ENV" $CONDA_DEFAULT_ENV
+
+echo "convert to vcz: ${NAME}"
+
+vcf2zarr convert $INFILE ${OUTDIR}/${NAME}.vcz
+
+}
+
 #---------------------execute------------------------
 
 function main {  
@@ -216,12 +339,15 @@ function main {
 WORKDIR=/Users/zchen13/SCRATCH/Phasing
 SAMPLE=/Users/zchen13/data/oryza_19K_RGP
 COMMON=/Users/zchen13/SCRATCH/COMMON
+AA=/Users/zchen13/SCRATCH/ancestral_allele/02_est-sfs/AA_Obrth-mrdonls-95-85.tsv
 
 #
 RESULT1=$WORKDIR/01_S5-COMMON
 RESULT2=$WORKDIR/02_S5-LIGATE
 RESULT3=$WORKDIR/03_S5-RARE #AA INFERENCE USING ANCIFY
 RESULT4=$WORKDIR/04_S5-FINAL
+RESULT5=$WORKDIR/05_ADD_AA
+RESULT6=$WORKDIR/06_VCZ
 
 #CONSTANTS
 RIS_reference_panel=/Users/zchen13/miniforge3/manual/impute2/RIS_reference_panel
@@ -236,7 +362,8 @@ mkdir -p $RESULT1
 mkdir -p $RESULT2
 mkdir -p $RESULT3
 mkdir -p $RESULT4
-#mkdir -p $RESULT5
+mkdir -p $RESULT5
+mkdir -p $RESULT6
 
 }
 setup_dir
@@ -253,12 +380,30 @@ setup_dir
 #ligate $RESULT1 1 $RESULT2
 
 #PHASE RARE ALLELES
-phase_rare_chunks $COMMON/genome1.focal.chr1.vcf.bgz 1 1000000 43270923 50000 20000 $RESULT2/chr_1_scaffold.bcf $RESULT3 #use smaller steps! otherwise it will hit error and abort
+#phase_rare_chunks $COMMON/genome1.focal.chr1.vcf.bgz 1 1000000 43270923 50000 20000 $RESULT2/chr_1_scaffold.bcf $RESULT3 #use smaller steps! otherwise it will hit error and abort
+
+#PHASE WINDOWS THAT FAILED IN BULK (expand, shrink, or adjust window size)
+#phase_rare $COMMON/genome1.focal.chr1.vcf.bgz 1 10500000 10650000 150000 20000 $RESULT2/chr_1_scaffold.bcf $RESULT3 #use smaller steps! otherwise it will hit error and abort
+#phase_rare_chunks $COMMON/genome1.focal.chr1.vcf.bgz 1 37200000 37250000 10000 5000 $RESULT2/chr_1_scaffold.bcf $RESULT3 #use smaller steps! otherwise it will hit error and abort
+#phase_rare $COMMON/genome1.focal.chr1.vcf.bgz 1 43200000 43270923 70923 20000 $RESULT2/chr_1_scaffold.bcf $RESULT3 #use smaller steps! otherwise it will hit error and abort
+
+#REMOVE OVERLAPPED
+#cd $RESULT3
+#rm -f 1_43200000-43249999.rare.bcf* 1_10500000-10549999.rare.bcf* 1_10600000-10649999.rare.bcf*
+#cd -
 
 #CONCATENATE
 #concatenate $RESULT3 1 $RESULT4
 
+#NOW 01 02 03 CAN ALL BE CLEARED
+#BETTER TO MAKE A FOLDER FOR EACH CHR DURING THE PROCESS
 
+#ADD ANCESTRAL ALLELES
+#clean_AA $AA AA_Obrth-mrdonls-95-85 $RESULT5 #only need to run once for all alleles
+#add_AA $RESULT5/AA_Obrth-mrdonls-95-85_cleaned.tsv.gz $RESULT4/chr_1_scaffold.bcf  chr_1_scaffold $RESULT5
+
+#CONVERT TO VCZ
+convert_vcz $RESULT5/chr_1_scaffold_wAA.vcf.gz $RESULT6 chr_1_scaffold
 }
 
 

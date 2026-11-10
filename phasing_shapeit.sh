@@ -400,10 +400,13 @@ setup_dir
 
 #ADD ANCESTRAL ALLELES
 #clean_AA $AA AA_Obrth-mrdonls-95-85 $RESULT5 #only need to run once for all alleles
+#A SMALL CHUNK FOR EXPERIMENTING
+add_AA $RESULT5/AA_Obrth-mrdonls-95-85_cleaned.tsv.gz $RESULT3/1_500000-549999.rare.bcf  1_500000-549999 $RESULT5
 #add_AA $RESULT5/AA_Obrth-mrdonls-95-85_cleaned.tsv.gz $RESULT4/chr_1_scaffold.bcf  chr_1_scaffold $RESULT5
 
 #CONVERT TO VCZ
-convert_vcz $RESULT5/chr_1_scaffold_wAA.vcf.gz $RESULT6 chr_1_scaffold
+convert_vcz $RESULT5/1_500000-549999_wAA.vcf.gz $RESULT6 1_500000-549999
+#convert_vcz $RESULT5/chr_1_scaffold_wAA.vcf.gz $RESULT6 chr_1_scaffold
 }
 
 
